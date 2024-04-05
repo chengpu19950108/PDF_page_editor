@@ -25,9 +25,13 @@ class PDF_Page_Editor(Tk):
         self.images_for_tk = []
         self.folder_path_str = ''
         self.file_name_str = ''
-        self.current_image = None
-        self.current_image_for_tk = None
-        self.current_image_num = 0
+        self.current_image = None           #当前显示的图片原格式：pillow
+        self.current_image_for_tk = None    #当前显示的图片处理为tk格式
+        self.scale = []  #当前显示的图片缩放比例
+        self.current_image_num = 0  #当前显示的图片索引号
+        #初始化旋转角度队列、裁剪队列
+        self.rotation_angle = []
+        self.cut_y = []
         #初始化菜单栏，并显示窗口
         self.create_menu()
 
@@ -83,11 +87,13 @@ class PDF_Page_Editor(Tk):
         #为上一页，下一页绑定鼠标键盘触发事件
         last_page_area.tag_bind(last_page_click_area,"<Button-1>",self.turn_to_last_page)
         next_page_area.tag_bind(next_page_click_area,"<Button-1>",self.turn_to_next_page)
+        last_page_area.tag_bind(last_page_text,"<Button-1>",self.turn_to_last_page)
+        next_page_area.tag_bind(next_page_text,"<Button-1>",self.turn_to_next_page)
         last_page_area.bind_all('<KeyPress-Left>',self.turn_to_last_page)
         next_page_area.bind_all('<KeyPress-Right>',self.turn_to_next_page)
         # 将图片显示到image_area区域
         if image :
-            image_area.create_image(int(self.window_w/2),int(self.window_h),anchor='center',image=image)
+            image_area.create_image(int(self.window_w*0.8/2),int(self.window_h/2),anchor='center',image=image)
             image_area.create_text(50,10,text=(f'第{self.current_image_num+1}页，共{len(self.images_for_tk)}页'),fill='black')
         else :
             print ('无图片输入')
@@ -104,7 +110,6 @@ class PDF_Page_Editor(Tk):
             #适用pdfplumber转换PDF文件为image对象
             try:
                 with pdfplumber.open(self.file_path_str) as pdf:
-                    # print (pdf)
                     images = []
                     for index,page in enumerate(pdf.pages):
                         #转换为图片，dpi设置为200
@@ -120,24 +125,30 @@ class PDF_Page_Editor(Tk):
                 messagebox.showerror(title='文件打开错误',message='文件可能被加密，无法打开...',)
                 pass
 
-        #打开文件后将图片转换为canvas格式，并调用load_image显示当前图片
+        #打开文件后将图片转换为tk格式，并调用load_image显示当前图片
         last_num = 0
         last_num = len (self.images_for_tk)
         for image in images:
+            #原始图片添加到队列
             self.images.append(image)
+            #尺寸缩放后，缩放比例添加到队列，缩放比例并转换TK格式的图片添加到队列
+            scale,image = self.resize_image(image)
             image_for_tk = ImageTk.PhotoImage(image)
+            self.scale.append(scale)
             self.images_for_tk.append(image_for_tk)
         self.current_image_num = last_num
         self.current_image = self.images[last_num]
         self.current_image_for_tk = self.images_for_tk[last_num]
-        self.load_image(self.images_for_tk[last_num])       
+        # self.current_scale,self.current_image_for_tk = self.resize_image(self.current_image_for_tk)
+        self.load_image(self.current_image_for_tk)       
 
     def open_pdf_file(self):
         if len(self.images)>0:
+            self.scale = []
             self.images = []
             self.images_for_tk = []
             self.current_image = None
-            self.current_image_num = int()
+            self.current_image_num = 0
         self.add_pdf_file()
         
     def save_pdf_file(self):
@@ -188,12 +199,14 @@ class PDF_Page_Editor(Tk):
         w_scale = image_w/self.window_w
         h_scale = image_h/self.window_h
         scale = max(w_scale,h_scale)
-        image_resized = image.resize((int(image_w/scale),int(image_h/scale)))
-        return image_resized
-    #
+        #先转换为黑白图片显示，以保证后面图片处理后的清晰度
+        image = image.convert('L')
+        image_resized = image.resize((int(image_w/scale),int(image_h/scale)),resample=Image.BICUBIC)
+        return (scale,image_resized)
+    
 
 if __name__ == '__main__':
     App = PDF_Page_Editor()
     App.mainloop()
-    #检测到窗口关闭，强制结束进程，必须在mainloop之后
+    #检测到窗口关闭时强制结束进程，必须在mainloop之后
     App.protocol("WM_DELETE_WINDOW",App._quit())
