@@ -21,25 +21,25 @@ class PDF_Page_Editor(Tk):
         #设定窗口大小，偏移0,0
         self.geometry(f"{self.window_w}x{self.window_h}+0+0")
         #初始化图片列表、文件路径
-        self.image_num = 0
-        self.images = []
-        self.images_for_tk = []
-        self.original_image_folder = ''
-        self.converted_image_folder = ''
-        self.folder_path_str = ''
-        self.file_name_str = ''
+        self.image_num = 0                  #已打开的总的页面数量
+        self.images = []                    #pillow图片列表
+        self.images_for_tk = []             #tk格式图片列表
+        self.original_image_folder = ''     #转换前的临时图片存储路径，文件保存后将被自动删除
+        self.converted_image_folder = ''    #转换后的临时图片存储路径，文件保存后将被自动删除
+        self.folder_path_str = ''           #当前打开的PDF路径
+        self.file_name_str = ''             #当前打开的PDF文件名称
         self.current_image = None           #当前显示的图片原格式：pillow
         self.current_image_for_tk = None    #当前显示的图片处理为tk格式
-        self.scale = []  #当前显示的图片缩放比例
-        self.current_image_num = 0  #当前显示的图片索引号
-        #初始化旋转角度队列、裁剪队列
-        self.rotation_angle = []
-        self.cut_y = []
+        self.current_image_num = 0          #当前显示的图片索引号
+        self.scale = []                     #图片的缩放比例列表
+        self.rotation_angle = []            #图片的旋转角度列表
+        self.cut_y = []                     #图片的裁剪参数列表
         #初始化菜单栏，并显示窗口
         self.create_menu()
 
     def _quit(self):
-        '''窗口关闭时，摧毁所有创建的进程'''
+        '''窗口关闭时，清除变量、删除临时文件、摧毁所有创建的进程'''
+        self.clear_temp()
         try:
             self.destroy()
         except Exception:
@@ -51,9 +51,6 @@ class PDF_Page_Editor(Tk):
         menu_frame = Frame(self)
         menu_frame.grid(row=0,column=0,sticky=NW)
         menubar = Menu(menu_frame)
-        # #canvas框架，画布框架
-        # canvas_frame = Frame(self)
-        # canvas_frame.grid(row=1,column=0)
         #创建文件操作菜单，注意command调用的函数不能加（）
         menubar.add_command(label='打开文件',command=self.open_pdf_file)
         menubar.add_command(label='添加文件',command=self.add_pdf_file)
@@ -98,13 +95,17 @@ class PDF_Page_Editor(Tk):
         if image :
             image_area.create_image(int(self.window_w*0.8/2),int(self.window_h/2),anchor='center',image=image)
             image_area.create_text(50,10,text=(f'第{self.current_image_num+1}页，共{len(self.images_for_tk)}页'),fill='black')
+            # image_area.create_rectangle(100,0,1000,800,outline='black')
         else :
             print ('当前无输入')
+        #返回一个canvas对象，方便后续在本区域绘制交互图形
+        return image_area
 
     def add_pdf_file(self):
-        """弹窗选取PDF文件,更新到class类数据中"""
+        """弹窗选取PDF文件,更新到类变量中。不清除已打开的文件，将新文件自动添加到队列后，可实现合并pdf文件的功能"""
         #弹窗选取文件，获取文件绝对路径
         self.file_path_str = filedialog.askopenfilename(initialdir='Desktop',filetypes=[('PDF','pdf')])
+        #文件打开后，校验文件是否正确、临时文件夹是否正确、队列中是否已有加载的文件，
         if self.file_path_str == '':
             print('文件未被打开')
         else:
@@ -134,7 +135,6 @@ class PDF_Page_Editor(Tk):
                 self.converted_image_folder =temp_path_converted
             else:
                 pass
-
             #转换PDF文件为适用pdfplumberimage对象
             try:
                 with pdfplumber.open(self.file_path_str) as pdf:
@@ -150,58 +150,40 @@ class PDF_Page_Editor(Tk):
             except Exception:
                 messagebox.showerror(title='文件打开错误',message='文件可能被加密，无法打开...',)
                 return
-        #打开文件后将图片转换为tk格式，并调用load_image显示当前图片
+        #打开文件完成后，将原图转换为tk格式，并调用load_image显示当前图片
         for image in images:
             #原始图片添加到队列
             self.images.append(image)
             #尺寸缩放后，缩放比例添加到队列，缩放比例并转换TK格式的图片添加到队列
             scale,image_scaled = self.resize_image(image)
-            #图片裁剪后，裁剪参数添加到队列，并将转换后的图片添加到队列
-            #tobe done，裁剪相关参数尚未添加
             image_for_tk = ImageTk.PhotoImage(image_scaled)
             self.scale.append(scale)
             self.rotation_angle.append(0)
-            # self.cut_y.append()
+            # self.cut_y.append(0)
             self.images_for_tk.append(image_for_tk)
         self.current_image_num = self.image_num
         self.current_image = self.images[self.image_num]
         self.current_image_for_tk = self.images_for_tk[self.image_num]
         self.image_num = len (self.images)
         #加载完文件后，初始化旋转角度列表、裁剪清单列表
-        self.load_image(self.current_image_for_tk)
-
-    def clear_vars(self):
-        self.image_num = 0
-        self.scale = []
-        self.images = []
-        self.images_for_tk = []
-        self.current_image = None
-        self.current_image_for_tk = None
-        self.current_image_num = 0
-        self.original_image_folder = ''
-        self.converted_image_folder = ''
-        self.folder_path_str = ''
-        self.file_name_str = ''
-        self.rotation_angle = []
-        self.cut_y = []
+        image_area = self.load_image(self.current_image_for_tk)
+        # image_area.create_rectangle(100,0,1000,800,outline='black')
 
     def open_pdf_file(self):
+        """新打开一个文件，清除已有变量值后打开新的工作区"""
         if len(self.images)>0:
             self.clear_vars()
-            if path.exists(self.original_image_folder):
-                shutil.rmtree(self.original_image_folder,ignore_errors=True)
-            if path.exists(self.converted_image_folder):
-                shutil.rmtree(self.converted_image_folder,ignore_errors=True)
+            self.clear_temp()
         #参数全部初始化后，执行添加文件操作
         self.add_pdf_file()
         
     def save_pdf_file(self):
+        """将当前进程中校正后的所有页面保存为一个PDF文件，存放在第一个打开的文件所在的路径"""
         if self.images:
             image_path_list = []
             for index,image in enumerate(self.images):
                 image_path = path.join(self.converted_image_folder,str('image_'+str(index)+'.png'))
                 #对image进行旋转、裁剪等操作后
-                # image = image.rotate(self.rotation_angle[index]).cut(self.cut_y(index))
                 image.save(image_path)
                 image_path_list.append(image_path)
                 # self.images = image.cut(self.cut_y[index])
@@ -209,7 +191,7 @@ class PDF_Page_Editor(Tk):
             with open (output_file_name,'wb') as f:
                 write_content = img2pdf.convert(image_path_list)
                 f.write(write_content)
-            messagebox.showinfo(title='成功',message=f'转换后文件已保存至原路径，详细路径：{output_file_name}')
+            messagebox.showinfo(title='成功',message=f'yeah~文件转换成功。已保存至原路径，详细路径：{output_file_name}')
             #完成保存任务后，删除所有文件夹
             if path.exists(self.original_image_folder):
                 shutil.rmtree(self.original_image_folder,ignore_errors=True)
@@ -223,16 +205,95 @@ class PDF_Page_Editor(Tk):
             pass
 
     def delete_page(self):
-        pass
+        n = self.current_image_num
+        m = self.image_num
+        #只有一页或无页面的情况下，不能删除
+        if m == 1:
+            messagebox.showinfo(title='无法删除',message='这个文档只有一页了，无法继续删除...')
+            return
+        if m == 0:
+            return
+        #页面数大于1时，删除各队列中的本页相关内容
+        self.image_num -= 1
+        del self.images[n]
+        del self.images_for_tk[n]
+        del self.scale[n]
+        del self.rotation_angle[n]
+        # del self.cut_y[n]
+        #重新定位当前页面：删除了最后一页时，定位到首页，否则定位+1
+        if n+1 == m:
+            new_n = 0
+            self.current_image_num = new_n
+        else:
+            new_n = n
+            self.current_image_num = new_n
+        #更新当前页面的信息
+        self.current_image = self.images [new_n]
+        self.current_image_for_tk = self.images_for_tk[new_n]
+        #序列更新完成后加载页面
+        image_area = self.load_image(self.current_image_for_tk)
 
     def rotate_page(self):
-        pass
-
+        """对当前pillow格式图片逆时针旋转90度，并将更新到角度队列"""
+        n = self.current_image_num
+        self.images[n] = self.current_image.rotate(90,expand=True)
+        self.current_image = self.images[n]
+        self.rotation_angle[n] += 90
+        #旋转完成后重新计算长宽比例，load图像
+        self.scale[n],image_scaled = self.resize_image(self.current_image)
+        self.images_for_tk[n] = ImageTk.PhotoImage(image_scaled)
+        self.current_image_for_tk = self.images_for_tk[n]
+        self.load_image(self.current_image_for_tk)
+    
     def move_page_forward(self):
-        pass
+        n = self.current_image_num
+        m = self.image_num
+        #只有一页或无页面的情况下，不能移动
+        if m == 1 or m == 0:
+            return
+        if n == 0:
+            messagebox.showinfo(title='无法移动',message='已经移动到首页了，不能继续前移了...')
+            return
+        else:
+            new_n = n-1
+            self.current_image_num = new_n
+            image = self.images.pop(n)
+            self.images.insert(new_n,image)
+            image_for_tk = self.images_for_tk.pop(n)
+            self.images_for_tk.insert(new_n,image_for_tk)
+            scale = self.scale.pop(n)
+            self.scale.insert(new_n,scale)
+            rotation = self.rotation_angle.pop(n)
+            self.rotation_angle.insert(new_n,rotation)
+            # cut_y = self.cut_y.pop(n)
+            # self.cut_y.insert(new_n,cut_y)
+        #队列更新完成后，重新load图像
+        image_area = self.load_image(self.current_image_for_tk)
 
     def move_page_rear(self):
-        pass
+        n = self.current_image_num
+        m = self.image_num
+        #只有一页或无页面的情况下，不能移动
+        if m == 1 or m == 0:
+            return
+        if n+1 == m:
+            messagebox.showinfo(title='无法移动',message='已经移动到尾页了，不能继续后移了...')
+            return
+        else:
+            new_n = n+1
+            self.current_image_num = new_n
+            image = self.images.pop(n)
+            self.images.insert(new_n,image)
+            image_for_tk = self.images_for_tk.pop(n)
+            self.images_for_tk.insert(new_n,image_for_tk)
+            scale = self.scale.pop(n)
+            self.scale.insert(new_n,scale)
+            rotation = self.rotation_angle.pop(n)
+            self.rotation_angle.insert(new_n,rotation)
+            # cut_y = self.cut_y.pop(n)
+            # self.cut_y.insert(new_n,cut_y)
+        #队列更新完成后，重新load图像
+        image_area = self.load_image(self.current_image_for_tk)
 
     def cut_page(self):
         pass
@@ -249,7 +310,6 @@ class PDF_Page_Editor(Tk):
         #self.resize()
         self.load_image(self.current_image_for_tk)
         
-
     def turn_to_next_page(self,event):
         '''将当前页面数+1，如果已经为最大值，那么设置为0，并更新当前image 和 imgae_for_tk'''
         if self.current_image_num == len(self.images)-1:
@@ -263,6 +323,7 @@ class PDF_Page_Editor(Tk):
         self.load_image(self.current_image_for_tk)
 
     def resize_image(self,image):
+        """根据初始窗口尺寸和图片原始尺寸，重新调整图片以适应窗口大小，传入的图片为pillow格式"""
         image_w,image_h = image.size
         w_scale = image_w/self.window_w
         h_scale = image_h/self.window_h
@@ -272,6 +333,28 @@ class PDF_Page_Editor(Tk):
         image_resized = image.resize((int(image_w/scale),int(image_h/scale)),resample=Image.BICUBIC)
         return (scale,image_resized)
     
+    def clear_vars(self):
+        """将进程中的所有变量初始化"""
+        self.image_num = 0
+        self.scale = []
+        self.images = []
+        self.images_for_tk = []
+        self.current_image = None
+        self.current_image_for_tk = None
+        self.current_image_num = 0
+        self.original_image_folder = ''
+        self.converted_image_folder = ''
+        self.folder_path_str = ''
+        self.file_name_str = ''
+        self.rotation_angle = []
+        self.cut_y = []
+
+    def clear_temp(self):
+        """清除本地保存的临时文件，包含一个原图片文件夹和一个转换后的图片文件夹"""
+        if path.exists(self.original_image_folder):
+            shutil.rmtree(self.original_image_folder,ignore_errors=True)
+        if path.exists(self.converted_image_folder):
+            shutil.rmtree(self.converted_image_folder,ignore_errors=True)
 
 if __name__ == '__main__':
     App = PDF_Page_Editor()
