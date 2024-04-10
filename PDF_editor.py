@@ -1,3 +1,9 @@
+"""
+这是一个用于校正PDF文件页面顺序、方向，并进行简单合并、拆分、页面裁剪的小工具
+需要安装第三方包：pillow/pdfplumber/img2pdf
+使用中遇到的BUG及其他需求，欢迎联络：GAC R&D-程浦：chengpu@gacrnd.com
+如果有非常复杂的需求，建议使用具有编辑功能的专业阅读器
+"""
 from os import makedirs,path
 import pdfplumber
 from tkinter import *
@@ -36,6 +42,9 @@ class PDF_Page_Editor(Tk):
         self.cut_y = []                     #图片的裁剪参数列表
         #初始化菜单栏，并显示窗口
         self.create_menu()
+        self.image_area = None
+        self.cover_page_act = False         #初始化当前插入色块功能状态，初始不激活
+        
 
     def _quit(self):
         '''窗口关闭时，清除变量、删除临时文件、摧毁所有创建的进程'''
@@ -54,7 +63,7 @@ class PDF_Page_Editor(Tk):
         #创建文件操作菜单，注意command调用的函数不能加（）
         menubar.add_command(label='打开文件',command=self.open_pdf_file)
         menubar.add_command(label='添加文件',command=self.add_pdf_file)
-        menubar.add_command(label='保存',command=self.save_pdf_file,accelerator='Ctrl+S')
+        menubar.add_command(label='保存并关闭',command=self.save_pdf_file,accelerator='Ctrl+S')
         menubar.add_command(label='退出',command=self._quit)
         menubar.add_separator()
         menubar.add_separator()
@@ -64,7 +73,7 @@ class PDF_Page_Editor(Tk):
         menubar.add_command(label='本页前移',command=self.move_page_forward)
         menubar.add_command(label='本页后移',command=self.move_page_rear)
         menubar.add_separator()
-        menubar.add_command(label='裁剪需删除区域',command=self.cut_page)
+        cover_button = menubar.add_command(label='插入色块（遮盖不相关区域）',command=self.cover_page)
         self.config(menu=menubar)
           
     def load_image(self,image):
@@ -99,7 +108,7 @@ class PDF_Page_Editor(Tk):
         else :
             print ('当前无输入')
         #返回一个canvas对象，方便后续在本区域绘制交互图形
-        return image_area
+        return (image_area)
 
     def add_pdf_file(self):
         """弹窗选取PDF文件,更新到类变量中。不清除已打开的文件，将新文件自动添加到队列后，可实现合并pdf文件的功能"""
@@ -166,11 +175,11 @@ class PDF_Page_Editor(Tk):
         self.current_image_for_tk = self.images_for_tk[self.image_num]
         self.image_num = len (self.images)
         #加载完文件后，初始化旋转角度列表、裁剪清单列表
-        image_area = self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
         # image_area.create_rectangle(100,0,1000,800,outline='black')
 
     def open_pdf_file(self):
-        """新打开一个文件，清除已有变量值后打开新的工作区"""
+        """清除已有变量值后打开新的工作区"""
         if len(self.images)>0:
             self.clear_vars()
             self.clear_temp()
@@ -231,7 +240,7 @@ class PDF_Page_Editor(Tk):
         self.current_image = self.images [new_n]
         self.current_image_for_tk = self.images_for_tk[new_n]
         #序列更新完成后加载页面
-        image_area = self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
 
     def rotate_page(self):
         """对当前pillow格式图片逆时针旋转90度，并将更新到角度队列"""
@@ -268,7 +277,7 @@ class PDF_Page_Editor(Tk):
             # cut_y = self.cut_y.pop(n)
             # self.cut_y.insert(new_n,cut_y)
         #队列更新完成后，重新load图像
-        image_area = self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
 
     def move_page_rear(self):
         n = self.current_image_num
@@ -293,10 +302,39 @@ class PDF_Page_Editor(Tk):
             # cut_y = self.cut_y.pop(n)
             # self.cut_y.insert(new_n,cut_y)
         #队列更新完成后，重新load图像
-        image_area = self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
 
-    def cut_page(self):
-        pass
+    def cover_page(self):
+        """插入一个色块，用于遮盖不相关区域达到保密的目的"""
+        
+        if self.cover_page_act == True:
+            self.cover_page_act = False
+            self.image_area = self.load_image(self.current_image_for_tk)
+            return
+        else:
+            self.cover_page_act = True
+            n = self.current_image_num
+            image = self.current_image
+            scale = self.scale[n]
+            self.image_area.bind ("<Button-1>",self.on_left_button_click)
+            self.image_area.bind ("<B1-Motion>",self.on_mouse_drag)
+            self.image_area.configure(cursor = "cross")
+            self.start_x = None
+            self.start_y = None
+        
+    def on_left_button_click(self,event):
+        self.start_x = self.image_area.canvasx(event.x)
+        self.start_y = self.image_area.canvasy(event.y)
+
+    def on_mouse_drag(self,event):
+        x1, y1 = self.image_area.canvasx(event.x), self.image_area.canvasy(event.y)
+        x2, y2 = self.start_x, self.start_y
+        self.image_area.delete("rect")
+        self.image_area.create_rectangle(x1, y1, x2, y2, tags="rect", outline="red")
+        self.start_x, self.start_y = x2, y2
+
+    # def change_cursor(self,event):
+    #     event.widget.cursor("cross")
 
     def turn_to_last_page(self,event):
         '''将当前页面数-1，如果已经为0，那么设置为最大值，并更新当前image 和 imgae_for_tk'''
