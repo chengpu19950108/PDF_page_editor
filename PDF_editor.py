@@ -1,5 +1,5 @@
 """
-这是一个用于校正PDF文件页面顺序、方向，并进行简单合并、拆分、页面裁剪的小工具
+这是一个用于校正PDF文件页面顺序、方向，并进行简单合并、拆分、页面绘制矩形（用于遮盖框选区域达到保密目的）的小工具
 需要安装第三方包：pillow/pdfplumber/img2pdf
 使用中遇到的BUG及其他需求，欢迎联络：GAC R&D-程浦：chengpu@gacrnd.com
 如果有非常复杂的需求，建议使用具有编辑功能的专业阅读器
@@ -9,7 +9,7 @@ import pdfplumber
 from tkinter import *
 from tkinter.ttk import *
 from tkinter import filedialog,messagebox
-from PIL import Image,ImageTk
+from PIL import Image,ImageTk,ImageDraw
 import img2pdf
 import shutil
 
@@ -39,23 +39,9 @@ class PDF_Page_Editor(Tk):
         self.current_image_num = 0          #当前显示的图片索引号
         self.scale = []                     #图片的缩放比例列表
         self.rotation_angle = []            #图片的旋转角度列表
-        self.cut_y = []                     #图片的裁剪参数列表
-        #初始化菜单栏，并显示窗口
-        self.create_menu()
+        #canvas区域初始化
         self.image_area = None
         self.cover_page_act = False         #初始化当前插入色块功能状态，初始不激活
-        
-
-    def _quit(self):
-        '''窗口关闭时，清除变量、删除临时文件、摧毁所有创建的进程'''
-        self.clear_temp()
-        try:
-            self.destroy()
-        except Exception:
-            pass
-
-    def create_menu(self):
-        '''创建页面的顶部菜单栏：文件操作，页面操作等'''
         #创建Menu框架，文件管理框架及工具框架
         menu_frame = Frame(self)
         menu_frame.grid(row=0,column=0,sticky=NW)
@@ -73,8 +59,16 @@ class PDF_Page_Editor(Tk):
         menubar.add_command(label='本页前移',command=self.move_page_forward)
         menubar.add_command(label='本页后移',command=self.move_page_rear)
         menubar.add_separator()
-        cover_button = menubar.add_command(label='插入色块（遮盖不相关区域）',command=self.cover_page)
+        self.cover_button = menubar.add_command(label='插入色块（遮盖不相关区域）',command=self.cover_page,state=ACTIVE)
         self.config(menu=menubar)
+
+    def _quit(self):
+        '''窗口关闭时，清除变量、删除临时文件、摧毁所有创建的进程'''
+        self.clear_temp()
+        try:
+            self.destroy()
+        except Exception:
+            pass
           
     def load_image(self,image):
         '''创建画布区域，并显示传入的单张图片'''
@@ -104,7 +98,7 @@ class PDF_Page_Editor(Tk):
         if image :
             image_area.create_image(int(self.window_w*0.8/2),int(self.window_h/2),anchor='center',image=image)
             image_area.create_text(50,10,text=(f'第{self.current_image_num+1}页，共{len(self.images_for_tk)}页'),fill='black')
-            # image_area.create_rectangle(100,0,1000,800,outline='black')
+            self.cover_page_act = False
         else :
             print ('当前无输入')
         #返回一个canvas对象，方便后续在本区域绘制交互图形
@@ -168,7 +162,6 @@ class PDF_Page_Editor(Tk):
             image_for_tk = ImageTk.PhotoImage(image_scaled)
             self.scale.append(scale)
             self.rotation_angle.append(0)
-            # self.cut_y.append(0)
             self.images_for_tk.append(image_for_tk)
         self.current_image_num = self.image_num
         self.current_image = self.images[self.image_num]
@@ -176,7 +169,6 @@ class PDF_Page_Editor(Tk):
         self.image_num = len (self.images)
         #加载完文件后，初始化旋转角度列表、裁剪清单列表
         self.image_area = self.load_image(self.current_image_for_tk)
-        # image_area.create_rectangle(100,0,1000,800,outline='black')
 
     def open_pdf_file(self):
         """清除已有变量值后打开新的工作区"""
@@ -195,7 +187,6 @@ class PDF_Page_Editor(Tk):
                 #对image进行旋转、裁剪等操作后
                 image.save(image_path)
                 image_path_list.append(image_path)
-                # self.images = image.cut(self.cut_y[index])
             output_file_name = path.join(self.folder_path_str,str('converted_'+self.file_name_str))
             with open (output_file_name,'wb') as f:
                 write_content = img2pdf.convert(image_path_list)
@@ -214,6 +205,7 @@ class PDF_Page_Editor(Tk):
             pass
 
     def delete_page(self):
+        """删除当前显示的页面，并自动加载下一个页面"""
         n = self.current_image_num
         m = self.image_num
         #只有一页或无页面的情况下，不能删除
@@ -228,7 +220,6 @@ class PDF_Page_Editor(Tk):
         del self.images_for_tk[n]
         del self.scale[n]
         del self.rotation_angle[n]
-        # del self.cut_y[n]
         #重新定位当前页面：删除了最后一页时，定位到首页，否则定位+1
         if n+1 == m:
             new_n = 0
@@ -252,9 +243,10 @@ class PDF_Page_Editor(Tk):
         self.scale[n],image_scaled = self.resize_image(self.current_image)
         self.images_for_tk[n] = ImageTk.PhotoImage(image_scaled)
         self.current_image_for_tk = self.images_for_tk[n]
-        self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
     
     def move_page_forward(self):
+        """将本页在文档中的顺序向前移动一页"""
         n = self.current_image_num
         m = self.image_num
         #只有一页或无页面的情况下，不能移动
@@ -274,12 +266,11 @@ class PDF_Page_Editor(Tk):
             self.scale.insert(new_n,scale)
             rotation = self.rotation_angle.pop(n)
             self.rotation_angle.insert(new_n,rotation)
-            # cut_y = self.cut_y.pop(n)
-            # self.cut_y.insert(new_n,cut_y)
         #队列更新完成后，重新load图像
         self.image_area = self.load_image(self.current_image_for_tk)
 
     def move_page_rear(self):
+        """将本页在文档中的顺序向后移动一页"""
         n = self.current_image_num
         m = self.image_num
         #只有一页或无页面的情况下，不能移动
@@ -299,23 +290,18 @@ class PDF_Page_Editor(Tk):
             self.scale.insert(new_n,scale)
             rotation = self.rotation_angle.pop(n)
             self.rotation_angle.insert(new_n,rotation)
-            # cut_y = self.cut_y.pop(n)
-            # self.cut_y.insert(new_n,cut_y)
         #队列更新完成后，重新load图像
         self.image_area = self.load_image(self.current_image_for_tk)
 
     def cover_page(self):
         """插入一个色块，用于遮盖不相关区域达到保密的目的"""
-        
         if self.cover_page_act == True:
-            self.cover_page_act = False
             self.image_area = self.load_image(self.current_image_for_tk)
+            self.cover_page_act = False
             return
         else:
             self.cover_page_act = True
             n = self.current_image_num
-            image = self.current_image
-            scale = self.scale[n]
             self.image_area.bind ("<Button-1>",self.on_left_button_click)
             self.image_area.bind ("<B1-Motion>",self.on_mouse_drag)
             self.image_area.configure(cursor = "cross")
@@ -323,18 +309,63 @@ class PDF_Page_Editor(Tk):
             self.start_y = None
         
     def on_left_button_click(self,event):
+        """检测鼠标左键的按下事件，返回点击时的鼠标在屏幕上的坐标，此处为image_area的坐标"""
+        self.start_x = None
+        self.start_y = None
+        self.end_x = None
+        self.end_y = None
         self.start_x = self.image_area.canvasx(event.x)
         self.start_y = self.image_area.canvasy(event.y)
 
     def on_mouse_drag(self,event):
+        """检测鼠标按住左键拖动事件，返回鼠标在屏幕上的坐标，此处为image_area的坐标"""
         x1, y1 = self.image_area.canvasx(event.x), self.image_area.canvasy(event.y)
         x2, y2 = self.start_x, self.start_y
         self.image_area.delete("rect")
+        self.image_area.delete("confirms")
         self.image_area.create_rectangle(x1, y1, x2, y2, tags="rect", outline="red")
+        cancel_button = self.image_area.create_text(x1-100,y1-15,text="取消",tags='confirms',fill='red',font=('Arial',15))
+        confirm_button = self.image_area.create_text(x1-50,y1-15,text="确认",tags='confirms',fill='green',font=('Arial',15))
+        self.image_area.tag_bind(cancel_button,"<Button-1>",self.cancel_cover)
+        self.image_area.tag_bind(confirm_button,"<Button-1>",self.confirm_cover)
         self.start_x, self.start_y = x2, y2
+        self.end_x ,self.end_y = x1, y1
 
-    # def change_cursor(self,event):
-    #     event.widget.cursor("cross")
+    def cancel_cover(self,event):
+        self.image_area.delete("confirms")
+        self.image_area.delete("rect")
+        return
+
+    def confirm_cover(self,event):
+        """on_mouse_drag中点击确认按钮后执行覆盖操作"""
+        self.image_area.delete("confirms")
+        self.image_area.delete("rect")
+        n = self.current_image_num
+        image = self.current_image
+        scale = self.scale[n]
+        image_w, image_h = self.current_image.size
+        win_w = self.window_w
+        win_h = self.window_h
+        ox = win_w*0.8/2 - image_w/scale/2
+        oy = win_h/2 - image_h/scale/2
+        img_start_x = max(0,self.start_x - ox)*scale
+        img_start_y = max(0,self.start_y - oy)*scale
+        img_end_x = max(0,self.end_x - ox)*scale
+        img_end_y = max(0,self.end_y - oy)*scale
+        x1 = min (img_start_x,img_end_x)
+        x2 = max (img_start_x,img_end_x)
+        y1 = min (img_end_y,img_start_y)
+        y2 = max (img_end_y,img_start_y)
+        rect_draw = ImageDraw.Draw(image)
+        rect_draw.rectangle(((x1,y1),(x2,y2)),outline='white',fill='white')
+        self.images[n] = image
+        self.current_image = self.images[n]
+        self.scale[n],image_coverd = self.resize_image(image)
+        self.images_for_tk[n] = ImageTk.PhotoImage(image_coverd)
+        self.current_image_for_tk = self.images_for_tk[n]
+        self.image_area = self.load_image(self.current_image_for_tk)
+        #图片转换完成后，用于自动开始继续覆盖操作
+        self.cover_page()
 
     def turn_to_last_page(self,event):
         '''将当前页面数-1，如果已经为0，那么设置为最大值，并更新当前image 和 imgae_for_tk'''
@@ -344,9 +375,7 @@ class PDF_Page_Editor(Tk):
             self.current_image_num -= 1
         self.current_image = self.images[self.current_image_num]
         self.current_image_for_tk = self.images_for_tk[self.current_image_num]
-        #重设图片大小并显示
-        #self.resize()
-        self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
         
     def turn_to_next_page(self,event):
         '''将当前页面数+1，如果已经为最大值，那么设置为0，并更新当前image 和 imgae_for_tk'''
@@ -356,9 +385,7 @@ class PDF_Page_Editor(Tk):
             self.current_image_num += 1
         self.current_image = self.images[self.current_image_num]
         self.current_image_for_tk = self.images_for_tk[self.current_image_num]
-        #重设图片大小并显示
-        #self.resize()
-        self.load_image(self.current_image_for_tk)
+        self.image_area = self.load_image(self.current_image_for_tk)
 
     def resize_image(self,image):
         """根据初始窗口尺寸和图片原始尺寸，重新调整图片以适应窗口大小，传入的图片为pillow格式"""
